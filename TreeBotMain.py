@@ -2,7 +2,6 @@ from discord.ext import commands, tasks
 from discord.ui import Button, View
 from datetime import datetime, timedelta
 from collections import deque
-from pathlib import Path
 import logging
 import asyncio
 import json
@@ -10,7 +9,6 @@ import time
 import random
 import discord
 import aiohttp
-import os
 
 def get_bot_token():
     try:
