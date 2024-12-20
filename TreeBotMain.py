@@ -277,7 +277,6 @@ async def update_button_message():
                 content=f"Click this button to ping @tree role when the tree needs watering!{get_test_mode_message()}",
                 view=PingButton()
             )
-            logger.info("Updated button message")
         except Exception as e:
             logger.error(f"Error updating button message: {str(e)}")
 
@@ -409,8 +408,6 @@ async def list_banned(interaction: discord.Interaction):
 
 @bot.event
 async def on_ready():
-    logger.info(f"Bot {bot.user} is ready!")
-
     if not switch_activity.is_running():
         switch_activity.start()
 
@@ -422,16 +419,13 @@ async def on_ready():
         # Sync to all guilds the bot is in
         for guild in bot.guilds:
             await bot.tree.sync(guild=guild)
-            logger.info(f"Synced commands to guild: {guild.name}")
     except Exception as e:
         logger.error(f"Error syncing commands: {str(e)}")
 
     bot.add_view(PingButton())
 
-    # Start check_connection task if it's not already running
     if not check_connection.is_running():
         check_connection.start()
-        logger.info("Started connection check task")
 
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
@@ -444,7 +438,6 @@ async def on_ready():
         if existing_button:
             bot.ping_button_message = existing_button
             await update_button_message()
-            logger.info("Found and updated existing ping button message")
         else:
             async for message in channel.history(limit=100):
                 if message.author == bot.user:
@@ -455,19 +448,9 @@ async def on_ready():
                 view=PingButton()
             )
             logger.info("New ping button message created")
-
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
-
-    if bot.user in message.mentions:
-        activity = discord.Game(name="No activity set!")
-        if bot.activity:
-            activity = bot.activity
-        await message.channel.send(f"I'm currently {activity.name}")
-
-    await bot.process_commands(message)
+    if not switch_activity.is_running():
+        switch_activity.start()
+    print("Bot is ready")
 
 @tasks.loop(seconds=30)
 async def check_connection():
@@ -501,16 +484,14 @@ async def check_connection():
     except Exception as e:
         logger.error(f"Connection check error: {str(e)}")
 
-
 @check_connection.before_loop
 async def before_check_connection():
     await bot.wait_until_ready()
 
-
 @check_connection.after_loop
 async def after_check_connection():
     if check_connection.is_being_cancelled():
-        logger.info("Connection check task is being cancelled")
+        logger.info("Bot stopped, cleaning up...")
 
 @bot.event
 async def on_resumed():
@@ -538,9 +519,6 @@ async def on_command(ctx):
     logger.info(f"{ctx.author} used command: {ctx.command}")
 
 async def cleanup():
-    """Cleanup function to properly close connections"""
-    logger.info("Starting cleanup...")
-
     # Cancel any running tasks
     if check_connection.is_running():
         check_connection.cancel()
@@ -561,7 +539,6 @@ async def cleanup():
 
     # Wait for all aiohttp connections to close
     await asyncio.sleep(0.25)
-
 
 async def main():
     # Create a shared aiohttp session for the bot
@@ -600,14 +577,10 @@ async def main():
     # Final cleanup before exit
     await cleanup()
 
-
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        # Handle Ctrl+C gracefully
-        logger.info("Received keyboard interrupt, cleaning up...")
-        # We need to create and run a new event loop for cleanup
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(cleanup())
