@@ -142,7 +142,7 @@ CHANNEL_ID = 1272801417047834654
 REQUIRED_ROLE = 1186948054838951976
 
 def get_test_mode_message():
-    return " [I AM IN TEST MODE, PING ME FOR TESTING ☺]" if config["TEST_MODE"] else "i am NOT in test mode. I WILL PING TREE ROLE :angryemoji:"
+    return " [I AM IN TEST MODE, PING ME FOR TESTING ☺]" if config["TEST_MODE"] else ""
 
 class ConfirmView(View):
     def __init__(self, *, timeout=180):
