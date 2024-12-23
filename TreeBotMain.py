@@ -11,7 +11,6 @@ import discord
 from discord.ext import commands, tasks
 from discord.ui import Button, View
 
-
 def get_bot_token():
     try:
         with open("token.txt", "r") as file:
@@ -137,8 +136,6 @@ async def has_required_role(interaction: discord.Interaction):
 
 THREAD_ID = 1286821326778011790
 CHANNEL_ID = 1272801417047834654
-
-REQUIRED_ROLE = 1186948054838951976
 
 def get_test_mode_message():
     return " [I AM IN TEST MODE, PING ME FOR TESTING ☺]" if config["TEST_MODE"] else ""
