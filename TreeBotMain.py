@@ -74,12 +74,12 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-def get_role_id():
-    return 1186948054838951976 if config["TEST_MODE"] else 1286817521952886854
+def ping_role():
+    return 1286817521952886854 if config["TEST_MODE"] else 1286817521952886854
 
-def get_role_ids():
+def cmd_role():
     return [
-        1186948054838951976
+        1230263825203335269
     ]
 
 class TopicManager:
@@ -129,13 +129,13 @@ async def has_required_role(interaction: discord.Interaction):
     if member is None:
         member = await interaction.guild.fetch_member(interaction.user.id)
 
-    if not any(role.id in get_role_ids() for role in member.roles):
+    if not any(role.id in cmd_role() for role in member.roles):
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return False
     return True
 
-THREAD_ID = 1286821326778011790
-CHANNEL_ID = 1272801417047834654
+PING_DESTINATION = 965438061003550722
+BUTTON_DESTINATION = 1272801417047834654
 
 def get_test_mode_message():
     return " [I AM IN TEST MODE, PING ME FOR TESTING ☺]" if config["TEST_MODE"] else ""
@@ -209,12 +209,12 @@ class PingButton(View):
                 await interaction.followup.send("This button can only be used in a server.", ephemeral=True)
                 return
 
-            role = interaction.guild.get_role(get_role_id())
-            thread = bot.get_channel(THREAD_ID)
+            role = interaction.guild.get_role(ping_role())
+            thread = bot.get_channel(PING_DESTINATION) if PING_DESTINATION else bot.get_channel(BUTTON_DESTINATION)
 
-            if not role or not thread:
-                logger.error(f"Role or thread not found for user {interaction.user.name}")
-                await interaction.followup.send("Role or thread not found.", ephemeral=True)
+            if thread is None:
+                logger.error(f"Thread or channel not found for user {interaction.user.name}")
+                await interaction.followup.send("Thread or channel not found.", ephemeral=True)
                 return
 
             if user_id in self.previous_confirmation_messages:
@@ -258,7 +258,7 @@ async def update_button_message():
     if hasattr(bot, 'ping_button_message'):
         try:
             await bot.ping_button_message.edit(
-                content=f"Click this button to ping @tree role when the tree needs watering!{get_test_mode_message()}",
+                content=f"Click this button to ping `@tree` role when the tree needs watering!{get_test_mode_message()}",
                 view=PingButton()
             )
         except Exception as e:
@@ -269,6 +269,142 @@ async def check_roles(interaction: discord.Interaction):
         await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
         return False
     return True
+
+@bot.tree.command(name="addallowedrole", description="Add a role to the list of roles allowed to use the bot")
+async def addallowedrole(interaction: discord.Interaction, role_id: str):
+    if not await has_required_role(interaction):
+        logger.info(f"{interaction.user.name} attempted: addallowedrole {role_id}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    try:
+        role_id_int = int(role_id)
+
+        role_ids = config.get("ROLE_IDS", [])
+
+        if role_id_int in role_ids:
+            await interaction.response.send_message(f"Role ID {role_id} is already in the allowed roles list.", ephemeral=True)
+            return
+
+        role_ids.append(role_id_int)
+
+        config["ROLE_IDS"] = role_ids
+
+        logger.info(f"{interaction.user.name} added role: {role_id}")
+        await interaction.response.send_message(f"Added role ID {role_id} to the allowed roles list.", ephemeral=True)
+
+    except ValueError:
+        await interaction.response.send_message("Invalid role ID format. Please provide a valid number.", ephemeral=True)
+
+@bot.tree.command(name="removeallowedrole", description="Remove a role from the list of roles allowed to use the bot")
+async def removeallowedrole(interaction: discord.Interaction, role_id: str):
+    if not await has_required_role(interaction):
+        logger.info(f"{interaction.user.name} attempted: removeallowedrole {role_id}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    try:
+        role_id_int = int(role_id)
+        role_ids = cmd_role()
+
+        if role_id_int not in role_ids:
+            await interaction.response.send_message(f"Role ID {role_id} is not in the allowed roles list.",
+                                                    ephemeral=True)
+            return
+
+        role_ids.remove(role_id_int)
+
+        def cmd_role():
+            return role_ids
+
+        logger.info(f"{interaction.user.name} removed role: {role_id}")
+        await interaction.response.send_message(f"Removed role ID {role_id} from allowed roles list.", ephemeral=True)
+
+    except ValueError:
+        await interaction.response.send_message("Invalid role ID format. Please provide a valid number.",
+                                                ephemeral=True)
+
+@bot.tree.command(name="setpingrole", description="Set the role that gets pinged by the bot")
+async def setpingrole(interaction: discord.Interaction, role_id: str):
+    if not await has_required_role(interaction):
+        logger.info(f"{interaction.user.name} attempted: setpingrole {role_id}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    try:
+        role_id_int = int(role_id)
+
+        def ping_role():
+            return role_id_int if config["TEST_MODE"] else role_id_int
+
+        logger.info(f"{interaction.user.name} set ping role: {role_id}")
+        await interaction.response.send_message(f"Updated ping role ID to {role_id}.", ephemeral=True)
+        await update_button_message()
+
+    except ValueError:
+        await interaction.response.send_message("Invalid role ID format. Please provide a valid number.",
+                                                ephemeral=True)
+
+button_messages = []
+
+@bot.tree.command(name="setchannel", description="Set the channel where the bot posts its messages")
+async def setchannel(interaction: discord.Interaction, channel_id: str):
+    if not await has_required_role(interaction):
+        logger.info(f"{interaction.user.name} attempted: setchannel {channel_id}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    try:
+        channel_id_int = int(channel_id)
+        global BUTTON_DESTINATION
+        BUTTON_DESTINATION = channel_id_int
+
+        logger.info(f"{interaction.user.name} set channel: {channel_id}")
+        await interaction.response.send_message(f"Updated channel ID to {channel_id}.", ephemeral=True)
+
+        channel = bot.get_channel(BUTTON_DESTINATION)
+        if channel:
+            existing_message = None
+            async for message in channel.history(limit=100):
+                if message.author == bot.user and message.embeds:
+                    for embed in message.embeds:
+                        if "Click this button" in embed.description:
+                            existing_message = message
+                            break
+                if existing_message:
+                    break
+
+            if not existing_message:
+                bot.ping_button_message = await channel.send(
+                    f"Click this button to ping `@tree` role when the tree needs watering!{get_test_mode_message()}",
+                    view=PingButton()
+                )
+
+    except ValueError:
+        await interaction.response.send_message("Invalid channel ID format. Please provide a valid number.", ephemeral=True)
+
+@bot.tree.command(name="setthread", description="Set the thread where the bot sends ping messages")
+async def setthread(interaction: discord.Interaction, thread_id: str):
+    if not await has_required_role(interaction):
+        logger.info(f"{interaction.user.name} attempted: setthread {thread_id}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    try:
+        global PING_DESTINATION
+        if thread_id.lower() == "null":
+            PING_DESTINATION = None
+            logger.info(f"{interaction.user.name} set thread to None.")
+            await interaction.response.send_message("Thread ID set to `None`. The bot will now use the channel ID.", ephemeral=True)
+        else:
+            PING_DESTINATION = int(thread_id)
+            logger.info(f"{interaction.user.name} set thread: {thread_id}")
+            await interaction.response.send_message(f"Updated thread ID to {thread_id}.", ephemeral=True)
+    except ValueError:
+        await interaction.response.send_message("Invalid thread ID format. Please provide a valid number or 'null'.", ephemeral=True)
 
 @bot.tree.command(name="topic", description="Get a random discussion topic")
 async def get_topic(interaction: discord.Interaction):
@@ -285,7 +421,6 @@ async def get_topic(interaction: discord.Interaction):
             "An error occurred while getting a topic. Please try again.",
             ephemeral=True
         )
-
 @bot.tree.command(name="toggletestmode", description="Toggle test mode on/off")
 async def toggle_test_mode(interaction: discord.Interaction):
     if not await has_required_role(interaction):
@@ -392,11 +527,11 @@ async def on_ready():
     if not check_connection.is_running():
         check_connection.start()
 
-    channel = bot.get_channel(CHANNEL_ID)
+    channel = bot.get_channel(BUTTON_DESTINATION)
     if channel:
         existing_button = None
         async for message in channel.history(limit=100):
-            if message.author == bot.user and "Click this button to ping @tree role" in message.content:
+            if message.author == bot.user and "Click this button to ping `@tree` role" in message.content:
                 existing_button = message
                 break
 
@@ -409,7 +544,7 @@ async def on_ready():
                     await message.delete()
 
             bot.ping_button_message = await channel.send(
-                f"Click this button to ping @tree role when the tree needs watering!{get_test_mode_message()}",
+                f"Click this button to ping `@tree` role when the tree needs watering!{get_test_mode_message()}",
                 view=PingButton()
             )
             logger.info("New ping button message created")
@@ -417,7 +552,7 @@ async def on_ready():
         switch_activity.start()
     print("Bot is ready")
 
-@tasks.loop(seconds=30)
+@tasks.loop(seconds=20)
 async def check_connection():
     try:
         if bot.is_closed():
@@ -428,7 +563,7 @@ async def check_connection():
             logger.warning(f"High latency detected: {bot.latency:.2f}s")
             return
 
-        channel = bot.get_channel(CHANNEL_ID)
+        channel = bot.get_channel(BUTTON_DESTINATION)
         if channel and hasattr(bot, 'ping_button_message'):
             try:
                 message = await channel.fetch_message(bot.ping_button_message.id)
@@ -438,7 +573,7 @@ async def check_connection():
             except discord.NotFound:
                 logger.info("Ping button message not found, creating new one")
                 bot.ping_button_message = await channel.send(
-                    f"Click this button to ping @tree role when the tree needs watering!{get_test_mode_message()}",
+                    f"Click this button to ping `@tree` role when the tree needs watering!{get_test_mode_message()}",
                     view=PingButton()
                 )
             except Exception as e:
@@ -467,7 +602,7 @@ async def on_resumed():
                 await channel.fetch_message(bot.ping_button_message.id)
         except (discord.NotFound, discord.HTTPException):
             bot.ping_button_message = await channel.send(
-                f"Click this button to ping @tree role when the tree needs watering!{get_test_mode_message()}",
+                f"Click this button to ping `@tree` role when the tree needs watering!{get_test_mode_message()}",
                 view=PingButton()
             )
             logger.info("Recreated button message after resume")
