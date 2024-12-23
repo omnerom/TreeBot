@@ -134,7 +134,7 @@ async def has_required_role(interaction: discord.Interaction):
         return False
     return True
 
-PING_DESTINATION = 965438061003550722
+PING_DESTINATION = 1286821326778011790
 BUTTON_DESTINATION = 1272801417047834654
 
 def get_test_mode_message():
