@@ -80,7 +80,6 @@ def get_role_id():
 
 def get_role_ids():
     return [
-        1272788582691635211,
         1186948054838951976
     ]
 
