@@ -75,7 +75,7 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 def ping_role():
-    return 1286817521952886854 if config["TEST_MODE"] else 1186948054838951976
+    return 1186948054838951976 if config["TEST_MODE"] else 1286817521952886854
 
 def cmd_role():
     return [
