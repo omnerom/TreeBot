@@ -24,13 +24,10 @@ config = {
     "TEST_MODE": True,
     "COOLDOWN_SECONDS": 10,
     "BOT_TOKEN": BOT_TOKEN,
-    "BANNED_USERS": []
-}
-
-config.update({
+    "BANNED_USERS": [],
     "TOPIC_COOLDOWN_HOURS": 2,
     "TOPICS_FILE": "topics.txt"
-})
+}
 
 ACTIVITIES = [
     discord.Game(name="Watering the tree 🌳"),
@@ -81,6 +78,9 @@ def cmd_role():
     return [
         1230263825203335269
     ]
+
+PING_DESTINATION = 1286821326778011790
+BUTTON_DESTINATION = 1272801417047834654
 
 class TopicManager:
     def __init__(self, cooldown_hours: int):
@@ -133,9 +133,6 @@ async def has_required_role(interaction: discord.Interaction):
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return False
     return True
-
-PING_DESTINATION = 1286821326778011790
-BUTTON_DESTINATION = 1272801417047834654
 
 def get_test_mode_message():
     return " [I AM IN TEST MODE, PING ME FOR TESTING ☺]" if config["TEST_MODE"] else ""
