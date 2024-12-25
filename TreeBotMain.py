@@ -350,7 +350,7 @@ async def toggle_test_mode(interaction: discord.Interaction):
     save_config()
     mode_status = "enabled" if config["TEST_MODE"] else "disabled"
 
-    logger.info(f"{interaction.user.name} set toggletestmod: {mode_status}")
+    logger.info(f"{interaction.user.name} test mode {mode_status}")
 
     await update_button_message()
 
