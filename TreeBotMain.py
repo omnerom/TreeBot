@@ -33,7 +33,7 @@ ACTIVITIES = [
     discord.Game(name="Watering the tree 🌳"),
     discord.Game(name="Watching over the garden 🌻"),
     discord.Game(name="Shuffling leaves 🍂"),
-    discord.Game(name="Getting pinged by HazardGoose 🏓"),
+    discord.Game(name="Getting pinged by HazardGoose 🏓"), # Change this one if you want; it's specific to Fish
     discord.Game(name="Burning other trees 🔥"),
     discord.Game(name="Analyzing growth data 📈"),
     discord.Game(name="Checking soil moisture levels 💧"),
@@ -72,15 +72,15 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 def ping_role():
-    return 1186948054838951976 if config["TEST_MODE"] else 1286817521952886854
+    return 1186948054838951976 if config["TEST_MODE"] else 1286817521952886854 # First role id is the test role, second is actual ping role.
 
 def cmd_role():
     return [
-        1230263825203335269
+        1230263825203335269 # This is the role that can execute the admin commands (all except topic and listbanned)
     ]
 
-PING_DESTINATION = 1286821326778011790
-BUTTON_DESTINATION = 1272801417047834654
+PING_DESTINATION = 1286821326778011790 # Where the bot pings. you can set this to any channel or thread
+BUTTON_DESTINATION = 1272801417047834654 # Where the bot puts the button
 
 class TopicManager:
     def __init__(self, cooldown_hours: int):
@@ -514,15 +514,20 @@ async def on_resumed():
     await asyncio.sleep(1)
     if hasattr(bot, 'ping_button_message'):
         try:
-            channel = bot.get_channel(CHANNEL_ID)
+            channel = bot.get_channel(BUTTON_DESTINATION)
             if channel:
-                await channel.fetch_message(bot.ping_button_message.id)
-        except (discord.NotFound, discord.HTTPException):
-            bot.ping_button_message = await channel.send(
-                f"Click this button to ping `@tree` role when the tree needs watering!{get_test_mode_message()}",
-                view=PingButton()
-            )
-            logger.info("Recreated button message after resume")
+                try:
+                    await channel.fetch_message(bot.ping_button_message.id)
+                except discord.NotFound:
+                    bot.ping_button_message = await channel.send(
+                        f"Click this button to ping `@tree` role when the tree needs watering!{get_test_mode_message()}",
+                        view=PingButton()
+                    )
+                    logger.info("Recreated button message after resume")
+            else:
+                logger.error(f"Channel {BUTTON_DESTINATION} not found during resume")
+        except Exception as e:
+            logger.error(f"Error in on_resumed: {str(e)}")
 
 @bot.event
 async def on_error(event, *args, **kwargs):
@@ -533,25 +538,37 @@ async def on_command(ctx):
     logger.info(f"{ctx.author} used command: {ctx.command}")
 
 async def cleanup():
-    if check_connection.is_running():
-        check_connection.cancel()
-
-    if switch_activity.is_running():
-        switch_activity.cancel()
-
     try:
-        if not bot.is_closed():
-            await bot.close()
-    except Exception as e:
-        logger.error(f"Error during bot cleanup: {str(e)}")
+        if check_connection.is_running():
+            check_connection.cancel()
 
-    if hasattr(bot, 'session') and not bot.session.closed:
-        await bot.session.close()
+        if switch_activity.is_running():
+            switch_activity.cancel()
+
+        cleanup_tasks = []
+
+        if not bot.is_closed():
+            cleanup_tasks.append(asyncio.create_task(bot.close()))
+
+        if hasattr(bot, 'session') and not bot.session.closed:
+            cleanup_tasks.append(asyncio.create_task(bot.session.close()))
+
+        if cleanup_tasks:
+            try:
+                await asyncio.wait_for(asyncio.gather(*cleanup_tasks), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Cleanup tasks timed out")
+
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}")
 
     await asyncio.sleep(0.25)
 
 async def main():
     bot.session = aiohttp.ClientSession()
+    retry_count = 0
+    max_retries = 5
+    base_delay = 1
 
     while True:
         try:
@@ -560,6 +577,7 @@ async def main():
                 bot.ws._max_heartbeat_timeout = 120.0
 
             await bot.start(config["BOT_TOKEN"])
+            retry_count = 0
 
         except discord.errors.LoginFailure:
             logger.error("Invalid token")
@@ -568,16 +586,27 @@ async def main():
 
         except (discord.errors.ConnectionClosed,
                 discord.errors.GatewayNotFound,
-                discord.errors.HTTPException) as e:
-            logger.error(f"Connection error: {str(e)}")
+                discord.errors.HTTPException,
+                aiohttp.client_exceptions.ClientConnectionResetError) as e:
+            retry_count += 1
+            delay = min(base_delay * (2 ** retry_count), 300)
+
+            logger.error(f"Connection error (attempt {retry_count}/{max_retries}): {str(e)}")
+            logger.info(f"Attempting reconnect in {delay} seconds...")
+
             await cleanup()
-            await asyncio.sleep(10)
+
+            if retry_count >= max_retries:
+                logger.error("Max retry attempts reached. Shutting down.")
+                break
+
+            await asyncio.sleep(delay)
             continue
 
         except Exception as e:
             logger.error(f"Unexpected error in main loop: {str(e)}")
             await cleanup()
-            await asyncio.sleep(10)
+            await asyncio.sleep(60)
             continue
 
         await asyncio.sleep(10)
