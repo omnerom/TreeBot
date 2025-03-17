@@ -11,12 +11,14 @@ import discord
 from discord.ext import commands, tasks
 from discord.ui import Button, View
 
+
 def get_bot_token():
     try:
         with open("token.txt", "r") as file:
             return file.read().strip()
     except FileNotFoundError:
         raise ValueError("token.txt file not found. Please make sure it is in the same directory as the script.")
+
 
 BOT_TOKEN = get_bot_token()
 
@@ -26,14 +28,16 @@ config = {
     "BOT_TOKEN": BOT_TOKEN,
     "BANNED_USERS": [],
     "TOPIC_COOLDOWN_HOURS": 2,
-    "TOPICS_FILE": "topics.txt"
+    "TOPICS_FILE": "topics.txt",
+    "BUTTON_STATS": {},  # Track button presses
+    "TOPIC_STATS": {}  # Track topic usage
 }
 
 ACTIVITIES = [
     discord.Game(name="Watering the tree 🌳"),
     discord.Game(name="Watching over the garden 🌻"),
     discord.Game(name="Shuffling leaves 🍂"),
-    discord.Game(name="Getting pinged by HazardGoose 🏓"), # Change this one if you want; it's specific to Fish
+    discord.Game(name="Getting pinged by HazardGoose 🏓"),  # Change this one if you want; it's specific to Fish
     discord.Game(name="Burning other trees 🔥"),
     discord.Game(name="Analyzing growth data 📈"),
     discord.Game(name="Checking soil moisture levels 💧"),
@@ -41,22 +45,38 @@ ACTIVITIES = [
     discord.Game(name="Running diagnostics on root network 💻")
 ]
 
+
 @tasks.loop(seconds=30)
 async def switch_activity():
     activity = random.choice(ACTIVITIES)
     await bot.change_presence(activity=activity)
 
+
 def save_config():
     with open('config.json', 'w') as f:
         json.dump(config, f)
+
 
 def load_config():
     try:
         with open('config.json', 'r') as f:
             loaded_config = json.load(f)
             config.update(loaded_config)
+
+            # Convert string keys back to integers for stats dictionaries
+            if "BUTTON_STATS" in config:
+                config["BUTTON_STATS"] = {int(k): v for k, v in config["BUTTON_STATS"].items()}
+            else:
+                config["BUTTON_STATS"] = {}
+
+            if "TOPIC_STATS" in config:
+                config["TOPIC_STATS"] = {int(k): v for k, v in config["TOPIC_STATS"].items()}
+            else:
+                config["TOPIC_STATS"] = {}
     except FileNotFoundError:
         save_config()
+
+
 load_config()
 
 logging.basicConfig(
@@ -71,16 +91,21 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+
 def ping_role():
-    return 1186948054838951976 if config["TEST_MODE"] else 1286817521952886854 # First role id is the test role, second is actual ping role.
+    return 1186948054838951976 if config[
+        "TEST_MODE"] else 1286817521952886854  # First role id is the test role, second is actual ping role.
+
 
 def cmd_role():
     return [
-        1230263825203335269 # This is the role that can execute the admin commands (all except topic and listbanned)
+        1186948054838951976  # This is the role that can execute the admin commands (all except topic and listbanned)
     ]
 
-PING_DESTINATION = 1286821326778011790 # Where the bot pings. you can set this to any channel or thread
-BUTTON_DESTINATION = 1272801417047834654 # Where the bot puts the button
+
+PING_DESTINATION = 1286821326778011790  # Where the bot pings. you can set this to any channel or thread
+BUTTON_DESTINATION = 1272801417047834654  # Where the bot puts the button
+
 
 class TopicManager:
     def __init__(self, cooldown_hours: int):
@@ -122,7 +147,9 @@ class TopicManager:
         self.used_topics.append((topic, time.time()))
         return topic, reused
 
+
 bot.topic_manager = TopicManager(config["TOPIC_COOLDOWN_HOURS"])
+
 
 async def has_required_role(interaction: discord.Interaction):
     member = interaction.guild.get_member(interaction.user.id)
@@ -134,14 +161,17 @@ async def has_required_role(interaction: discord.Interaction):
         return False
     return True
 
+
 def get_test_mode_message():
     return " [I AM IN TEST MODE, PING ME FOR TESTING ☺]" if config["TEST_MODE"] else ""
+
 
 class ConfirmView(View):
     def __init__(self, *, timeout=180):
         super().__init__(timeout=timeout)
         self.value = None
         self.message = None
+        self.user_id = None
 
     async def on_timeout(self):
         await self.delete_confirmation_message()
@@ -159,6 +189,12 @@ class ConfirmView(View):
         await interaction.response.defer(ephemeral=True)
         self.value = True
         self.stop()
+        self.user_id = interaction.user.id
+
+        # Update button stats
+        config["BUTTON_STATS"][interaction.user.id] = config["BUTTON_STATS"].get(interaction.user.id, 0) + 1
+        save_config()
+
         logger.info(f"{interaction.user.name} confirm")
         await self.delete_confirmation_message()
         await interaction.followup.send("Pinged Tree Role!", ephemeral=True)
@@ -171,6 +207,7 @@ class ConfirmView(View):
         logger.info(f"{interaction.user.name} cancel")
         await self.delete_confirmation_message()
         await interaction.followup.send("Cancelled", ephemeral=True)
+
 
 class PingButton(View):
     def __init__(self):
@@ -221,6 +258,7 @@ class PingButton(View):
                     pass
 
             view = ConfirmView()
+            view.user_id = user_id
             confirmation_message = await interaction.followup.send(
                 f"Are you sure you want to ping the role?{get_test_mode_message()}",
                 view=view,
@@ -251,6 +289,79 @@ class PingButton(View):
             if (current_time - timestamp).total_seconds() < config["COOLDOWN_SECONDS"]
         }
 
+
+class LeaderboardView(View):
+    def __init__(self, user_stats, page=0, stat_type="button"):
+        super().__init__(timeout=180)
+        self.user_stats = user_stats
+        self.page = page
+        self.stat_type = stat_type
+        self.max_page = max(0, (len(user_stats) - 1) // 10)
+
+    @discord.ui.button(label="Button Stats", style=discord.ButtonStyle.primary)
+    async def button_stats(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=False)
+        self.stat_type = "button"
+        self.page = 0
+        await self.update_leaderboard(interaction)
+
+    @discord.ui.button(label="Topic Stats", style=discord.ButtonStyle.primary)
+    async def topic_stats(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=False)
+        self.stat_type = "topic"
+        self.page = 0
+        await self.update_leaderboard(interaction)
+
+    @discord.ui.button(label="⬅️ Previous", style=discord.ButtonStyle.secondary)
+    async def previous_page(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=False)
+        if self.page > 0:
+            self.page -= 1
+        await self.update_leaderboard(interaction)
+
+    @discord.ui.button(label="Next ➡️", style=discord.ButtonStyle.secondary)
+    async def next_page(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=False)
+        if self.page < self.max_page:
+            self.page += 1
+        await self.update_leaderboard(interaction)
+
+    async def update_leaderboard(self, interaction: discord.Interaction):
+        stats_data = config["BUTTON_STATS"] if self.stat_type == "button" else config["TOPIC_STATS"]
+
+        # Convert stats to list of tuples and sort by count (descending)
+        stats_list = sorted(stats_data.items(), key=lambda x: x[1], reverse=True)
+
+        # Calculate max page
+        self.max_page = max(0, (len(stats_list) - 1) // 10)
+
+        # Get entries for current page
+        start_idx = self.page * 10
+        end_idx = min(start_idx + 10, len(stats_list))
+        current_entries = stats_list[start_idx:end_idx]
+
+        embed = discord.Embed(
+            title=f"Tree Bot {'Button' if self.stat_type == 'button' else 'Topic'} Leaderboard",
+            description=f"Page {self.page + 1}/{self.max_page + 1}",
+            color=0x2ECC71
+        )
+
+        for idx, (user_id, count) in enumerate(current_entries, start=start_idx + 1):
+            try:
+                user = await bot.fetch_user(user_id)
+                username = user.name
+            except:
+                username = f"Unknown User ({user_id})"
+
+            embed.add_field(
+                name=f"{idx}. {username}",
+                value=f"{'Button Presses' if self.stat_type == 'button' else 'Topics Used'}: {count}",
+                inline=False
+            )
+
+        await interaction.edit_original_response(embed=embed, view=self)
+
+
 async def update_button_message():
     if hasattr(bot, 'ping_button_message'):
         try:
@@ -261,11 +372,13 @@ async def update_button_message():
         except Exception as e:
             logger.error(f"Error updating button message: {str(e)}")
 
+
 async def check_roles(interaction: discord.Interaction):
     if not has_required_role(interaction.user):
         await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
         return False
     return True
+
 
 @bot.tree.command(name="addallowedrole", description="Add a role to the list of roles allowed to use the bot")
 async def addallowedrole(interaction: discord.Interaction, role_id: str):
@@ -281,7 +394,8 @@ async def addallowedrole(interaction: discord.Interaction, role_id: str):
         role_ids = config.get("ROLE_IDS", [])
 
         if role_id_int in role_ids:
-            await interaction.response.send_message(f"Role ID {role_id} is already in the allowed roles list.", ephemeral=True)
+            await interaction.response.send_message(f"Role ID {role_id} is already in the allowed roles list.",
+                                                    ephemeral=True)
             return
 
         role_ids.append(role_id_int)
@@ -292,7 +406,9 @@ async def addallowedrole(interaction: discord.Interaction, role_id: str):
         await interaction.response.send_message(f"Added role ID {role_id} to the allowed roles list.", ephemeral=True)
 
     except ValueError:
-        await interaction.response.send_message("Invalid role ID format. Please provide a valid number.", ephemeral=True)
+        await interaction.response.send_message("Invalid role ID format. Please provide a valid number.",
+                                                ephemeral=True)
+
 
 @bot.tree.command(name="removeallowedrole", description="Remove a role from the list of roles allowed to use the bot")
 async def removeallowedrole(interaction: discord.Interaction, role_id: str):
@@ -323,10 +439,15 @@ async def removeallowedrole(interaction: discord.Interaction, role_id: str):
         await interaction.response.send_message("Invalid role ID format. Please provide a valid number.",
                                                 ephemeral=True)
 
+
 @bot.tree.command(name="topic", description="Get a random discussion topic")
 async def get_topic(interaction: discord.Interaction):
     try:
         topic, _ = bot.topic_manager.get_random_topic()
+
+        # Update topic stats
+        config["TOPIC_STATS"][interaction.user.id] = config["TOPIC_STATS"].get(interaction.user.id, 0) + 1
+        save_config()
 
         await interaction.response.send_message(f"{topic}")
 
@@ -338,6 +459,49 @@ async def get_topic(interaction: discord.Interaction):
             "An error occurred while getting a topic. Please try again.",
             ephemeral=True
         )
+
+
+@bot.tree.command(name="leaderboard", description="Show TreeBot leaderboard")
+async def show_leaderboard(interaction: discord.Interaction):
+    try:
+        logger.info(f"{interaction.user.name} used leaderboard")
+
+        button_stats = config["BUTTON_STATS"]
+        # Sort by count (highest first)
+        sorted_stats = sorted(button_stats.items(), key=lambda x: x[1], reverse=True)
+
+        view = LeaderboardView(sorted_stats)
+
+        embed = discord.Embed(
+            title="Tree Bot Button Leaderboard",
+            description="Page 1",
+            color=0x2ECC71
+        )
+
+        # Display top 10 (or fewer if there aren't 10 entries)
+        for idx, (user_id, count) in enumerate(sorted_stats[:10], start=1):
+            try:
+                user = await bot.fetch_user(user_id)
+                username = user.name
+            except:
+                username = f"Unknown User ({user_id})"
+
+            embed.add_field(
+                name=f"{idx}. {username}",
+                value=f"Button Presses: {count}",
+                inline=False
+            )
+
+        await interaction.response.send_message(embed=embed, view=view)
+
+    except Exception as e:
+        logger.error(f"Error in leaderboard command: {str(e)}")
+        await interaction.response.send_message(
+            "An error occurred while getting the leaderboard. Please try again.",
+            ephemeral=True
+        )
+
+
 @bot.tree.command(name="toggletestmode", description="Toggle test mode on/off")
 async def toggle_test_mode(interaction: discord.Interaction):
     if not await has_required_role(interaction):
@@ -356,6 +520,7 @@ async def toggle_test_mode(interaction: discord.Interaction):
 
     if not interaction.response.is_done():
         await interaction.response.send_message(f"Test mode {mode_status}", ephemeral=False)
+
 
 @bot.tree.command(name="ban", description="Ban a user from using the tree bot")
 async def ban_user(interaction: discord.Interaction, user: discord.User):
@@ -381,6 +546,7 @@ async def ban_user(interaction: discord.Interaction, user: discord.User):
         if not interaction.response.is_done():
             await interaction.response.send_message(f"{user.name} is already banned", ephemeral=False)
 
+
 @bot.tree.command(name="unban", description="Unban a user from the tree bot")
 async def unban_user(interaction: discord.Interaction, user: discord.User):
     if not await has_required_role(interaction):
@@ -404,6 +570,7 @@ async def unban_user(interaction: discord.Interaction, user: discord.User):
         if not interaction.response.is_done():
             await interaction.response.send_message(f"{user.name} is not banned", ephemeral=False)
 
+
 @bot.tree.command(name="listbanned", description="List all banned users")
 async def list_banned(interaction: discord.Interaction):
     logger.info(f"{interaction.user.name} used listbanned")
@@ -424,6 +591,7 @@ async def list_banned(interaction: discord.Interaction):
         "Banned users:\n" + "\n".join(banned_users),
         ephemeral=False
     )
+
 
 @bot.event
 async def on_ready():
@@ -469,6 +637,7 @@ async def on_ready():
         switch_activity.start()
     print("Bot is ready")
 
+
 @tasks.loop(seconds=20)
 async def check_connection():
     try:
@@ -499,14 +668,17 @@ async def check_connection():
     except Exception as e:
         logger.error(f"Connection check error: {str(e)}")
 
+
 @check_connection.before_loop
 async def before_check_connection():
     await bot.wait_until_ready()
+
 
 @check_connection.after_loop
 async def after_check_connection():
     if check_connection.is_being_cancelled():
         logger.info("Bot stopped, cleaning up...")
+
 
 @bot.event
 async def on_resumed():
@@ -529,13 +701,16 @@ async def on_resumed():
         except Exception as e:
             logger.error(f"Error in on_resumed: {str(e)}")
 
+
 @bot.event
 async def on_error(event, *args, **kwargs):
     logger.error(f"Error in {event}: {args} {kwargs}")
 
+
 @bot.event
 async def on_command(ctx):
     logger.info(f"{ctx.author} used command: {ctx.command}")
+
 
 async def cleanup():
     try:
@@ -563,6 +738,7 @@ async def cleanup():
         logger.error(f"Error during cleanup: {str(e)}")
 
     await asyncio.sleep(0.25)
+
 
 async def main():
     bot.session = aiohttp.ClientSession()
@@ -612,6 +788,7 @@ async def main():
         await asyncio.sleep(10)
 
     await cleanup()
+
 
 if __name__ == "__main__":
     try:
